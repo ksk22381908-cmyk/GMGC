@@ -61,6 +61,10 @@
 
 <div class="buttons">
   <button id="btnConnect" class="primary">GuMaGoChi 연결하기</button>
+  <button id="btnFeedHome" class="hidden">🍠 밥 주기</button>
+  <button id="btnPlayHome" class="hidden">🎈 놀아 주기</button>
+  <button id="btnSleepHome" class="hidden">🌙 재우기</button>
+  <button id="btnInfoHome" class="hidden">📋 화면에 정보</button>
   <button id="btnCall" class="primary hidden">🏃 놀이터로 부르기</button>
   <button id="btnGame" class="hidden">🐛 벌레 피하기</button>
   <button id="btnRun" class="hidden">🏃 밭 달리기</button>
@@ -123,7 +127,7 @@ let where = 'unknown';           // home | leaving | phone | sending
 let actor = { x: -PET, target: (W - PET) / 2, anim: 'idle', until: 0 };
 let game = null;
 let snacks = 0;
-let lastSp = -1;
+let lastSp = -1, lastSleep = -1;
 const $ = id => document.getElementById(id);
 const clamp = v => Math.max(0, Math.min(100, v));
 // 도감은 보드가 16진수 문자열로 보낸다 (37종 > 32비트)
@@ -175,6 +179,15 @@ class DemoLink {
     const s = this.s;
     if (line === 'HELLO') this.emit('STATE ' + JSON.stringify(s));
     if (line.startsWith('EVOLVE ')) this.evolve(+line.slice(7));
+    if (line === 'FEED' || line === 'PLAY' || line === 'SLEEP') {
+      let m = '';
+      if (line === 'SLEEP') { s.sleep = s.sleep ? 0 : 1; m = s.sleep ? 'GOOD NIGHT' : 'GOOD MORNING'; }
+      else if (s.sleep) m = 'Zzz...';
+      else if (line === 'FEED') { if (s.food >= 95) m = 'TOO FULL!'; else { s.food = clamp(s.food + 25); m = 'YUM!'; } }
+      else if (s.energy < 15) m = 'TOO TIRED';
+      else { s.fun = clamp(s.fun + 20); s.energy = clamp(s.energy - 10); m = 'YAY!'; }
+      this.emit('DID ' + m); this.emit('STATE ' + JSON.stringify(s), 80);
+    }
     if (line === 'CALL') { this.emit('LEAVING'); s.where = 'away'; this.emit('OUT ' + JSON.stringify(s), 1500); }
     if (line.startsWith('BACK')) {
       const g = k => +(line.match(new RegExp(k + '=(-?\\d+)')) || [0, 0])[1];
@@ -230,12 +243,21 @@ function onLine(line) {
     pet = JSON.parse(body);
   }
   if (cmd === 'STATE') {
+    const wasWhere = where, wasSleep = lastSleep;
+    lastSleep = pet.sleep;
     if (where !== 'phone' && where !== 'sending') where = pet.where === 'away' ? 'phone' : 'home';
     if (where === 'phone' && actor.x < 0) arrive();
     if (pet.sp === 0 && lastSp > 0) say('집에서 새 아기 구마가 태어났어요! 🐣');
     else if (pet.sp > 0 && lastSp >= 0 && pet.sp !== lastSp) say(`집에서 ${SPECIES[pet.sp].name}(으)로 진화했어요! ✨`);
-    else if (where === 'home') say(pet.sleep ? '구마는 집에서 자고 있어요 💤' : '구마는 지금 집(화면)에 있어요.');
+    else if (where === 'home' && (wasWhere !== 'home' || wasSleep !== pet.sleep))
+      say(pet.sleep ? '구마는 집에서 자고 있어요 💤' : '구마는 지금 집(화면)에 있어요. 여기서 바로 돌봐 줄 수도 있어요.');
     lastSp = pet.sp;
+  } else if (cmd === 'DID') {
+    const ko = { 'YUM!': '냠냠! 밥을 맛있게 먹었어요 🍠', 'TOO FULL!': '배가 너무 불러요. 조금 있다 주세요.',
+      'YAY!': '신나게 놀았어요 🎈', 'TOO TIRED': '너무 피곤해서 못 놀아요. 재워 주세요.',
+      'GOOD NIGHT': '잘 자, 구마 🌙', 'GOOD MORNING': '좋은 아침! ☀️', 'Zzz...': '자고 있어요. 먼저 깨워 주세요.',
+      'ON PHONE': '구마가 놀이터에 있어요.' };
+    say(ko[body] || body || '화면을 보세요!');
   } else if (cmd === 'LEAVING') {
     where = 'leaving'; say('구마가 화면 밖으로 걸어 나가는 중...');
   } else if (cmd === 'OUT') {
@@ -282,6 +304,12 @@ function refresh() {
   $('btnConnect').classList.toggle('hidden', on);
   $('btnCall').classList.toggle('hidden', !on || here || where === 'sending');
   $('btnCall').disabled = where === 'leaving';
+  const home = on && where === 'home' && !!pet;
+  for (const id of ['btnFeedHome', 'btnPlayHome', 'btnSleepHome', 'btnInfoHome']) $(id).classList.toggle('hidden', !home);
+  if (pet) {
+    $('btnSleepHome').textContent = pet.sleep ? '☀️ 깨우기' : '🌙 재우기';
+    $('btnFeedHome').disabled = $('btnPlayHome').disabled = !!pet.sleep;
+  }
   for (const id of ['btnGame', 'btnRun', 'btnSnack', 'btnPet', 'btnHome', 'btnShop']) {
     $(id).classList.toggle('hidden', !here);
     $(id).disabled = !!game;
@@ -584,6 +612,10 @@ $('btnShop').onclick = () => { $('shop').classList.toggle('hidden'); drawShop();
 
 // ---------- 버튼 ----------
 $('btnConnect').onclick = connect;
+$('btnFeedHome').onclick = () => link && link.send('FEED');
+$('btnPlayHome').onclick = () => link && link.send('PLAY');
+$('btnSleepHome').onclick = () => link && link.send('SLEEP');
+$('btnInfoHome').onclick = () => { if (link) { link.send('a'); say('화면 아래에 이름과 나이가 나와요.'); } };
 $('btnCall').onclick = () => { if (link) { link.send('CALL'); say('구마를 부르는 중...'); } };
 $('btnHome').onclick = sendHome;
 $('btnGame').onclick = startGame;
