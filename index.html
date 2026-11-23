@@ -150,6 +150,10 @@ class DemoLink {
 let link = null;
 
 async function connect() {
+  if (!DEMO && !navigator.bluetooth) {
+    say('이 브라우저는 블루투스를 지원하지 않아요. Chrome 앱에서 이 주소를 열어 주세요.');
+    return;
+  }
   try {
     link = DEMO ? new DemoLink() : new BleLink();
     link.onLine = onLine;
