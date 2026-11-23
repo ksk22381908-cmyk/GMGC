@@ -37,6 +37,12 @@
   .dex canvas { width: 100%; aspect-ratio: 1; background: #f0e6d6; border-radius: 10px; image-rendering: pixelated; }
   .hint { font-size: 12px; color: var(--muted); margin: 8px 0 0; line-height: 1.5; }
   h2 { font-size: 15px; margin: 0 0 8px; }
+  .item { display: grid; grid-template-columns: 1fr auto; gap: 4px 10px; align-items: center;
+    padding: 10px 0; border-top: 1px solid var(--line); }
+  .item:first-child { border-top: 0; }
+  .item b { font-size: 15px; }
+  .item small { color: var(--muted); grid-column: 1; }
+  .item button { grid-row: 1 / span 2; grid-column: 2; padding: 10px 14px; font-size: 14px; white-space: nowrap; }
   a { color: var(--accent); }
 </style>
 </head>
@@ -56,6 +62,13 @@
   <button id="btnSnack" class="hidden">🍠 간식 주기</button>
   <button id="btnPet" class="hidden">🤚 쓰다듬기</button>
   <button id="btnHome" class="hidden">🏠 집으로 보내기</button>
+  <button id="btnShop" class="hidden" style="grid-column: 1 / -1">🛒 씨앗 상점</button>
+</div>
+
+<div class="card hidden" id="shop">
+  <h2 id="shopTitle">씨앗 상점</h2>
+  <div id="shopItems"></div>
+  <p class="hint">산 물건은 놀이터에서 바로 쓰고, 구마가 집에 갈 때 함께 저장돼요.</p>
 </div>
 
 <div class="card">
@@ -94,11 +107,12 @@ const ready = Promise.all([...SPECIES.map(s => loadImg(s.key, `assets/${s.key}.p
 
 // ---------- 상태 ----------
 let pet = null;                  // 보드에서 받은 상태
-let delta = { exp: 0, fun: 0, food: 0, energy: 0, seeds: 0 };  // 폰에 있는 동안 받은 보상
+let delta = { exp: 0, fun: 0, food: 0, energy: 0, seeds: 0, egg: 0 };  // 폰에 있는 동안 받은 보상
 let where = 'unknown';           // home | leaving | phone | sending
 let actor = { x: -PET, target: (W - PET) / 2, anim: 'idle', until: 0 };
 let game = null;
 let snacks = 0;
+let lastSp = -1;
 const $ = id => document.getElementById(id);
 const clamp = v => Math.max(0, Math.min(100, v));
 
@@ -141,8 +155,9 @@ class DemoLink {
     if (line.startsWith('BACK')) {
       const g = k => +(line.match(new RegExp(k + '=(-?\\d+)')) || [0, 0])[1];
       s.food = clamp(s.food + g('food')); s.fun = clamp(s.fun + g('fun')); s.energy = clamp(s.energy + g('energy'));
-      s.exp = Math.min(s.evo, s.exp + g('exp')); s.seeds += g('seeds'); s.where = 'returning';
+      s.exp = Math.min(s.evo, s.exp + g('exp')); s.seeds = Math.max(0, s.seeds + g('seeds')); s.where = 'returning';
       this.emit('HOME ' + JSON.stringify(s));
+      if (g('egg') && s.sp) setTimeout(() => { Object.assign(s, { sp: 0, exp: 0, food: 80, fun: 80, energy: 80, gen: (s.gen || 1) + 1 }); this.emit('STATE ' + JSON.stringify(s)); }, 6000);
     }
   }
 }
@@ -192,12 +207,17 @@ function onLine(line) {
   if (cmd === 'STATE') {
     if (where !== 'phone' && where !== 'sending') where = pet.where === 'away' ? 'phone' : 'home';
     if (where === 'phone' && actor.x < 0) arrive();
-    if (where === 'home') say(pet.sleep ? '구마는 집에서 자고 있어요 💤' : '구마는 지금 집(화면)에 있어요.');
+    if (pet.sp === 0 && lastSp > 0) say('집에서 새 아기 구마가 태어났어요! 🐣');
+    else if (pet.sp > 0 && lastSp === 0) say(`집에서 ${SPECIES[pet.sp].name}(으)로 진화했어요! ✨`);
+    else if (where === 'home') say(pet.sleep ? '구마는 집에서 자고 있어요 💤' : '구마는 지금 집(화면)에 있어요.');
+    lastSp = pet.sp;
   } else if (cmd === 'LEAVING') {
     where = 'leaving'; say('구마가 화면 밖으로 걸어 나가는 중...');
   } else if (cmd === 'OUT') {
+    lastSp = pet.sp;
     arrive();
   } else if (cmd === 'HOME') {
+    lastSp = pet.sp;
     where = 'home'; resetDelta(); say('구마가 집으로 돌아갔어요. 화면을 보세요!');
   } else if (cmd === 'NO') {
     say(body === 'sleeping' ? '구마가 자고 있어서 못 나와요 💤' : '지금은 바빠요. 잠시 후 다시 불러 주세요.');
@@ -212,7 +232,7 @@ function arrive() {
   say('구마가 놀이터에 왔어요!');
 }
 
-function resetDelta() { delta = { exp: 0, fun: 0, food: 0, energy: 0, seeds: 0 }; }
+function resetDelta() { delta = { exp: 0, fun: 0, food: 0, energy: 0, seeds: 0, egg: 0 }; }
 
 // 집으로 보내기: 왼쪽 밖으로 걸어 나간 뒤 보상과 함께 BACK 전송
 function sendHome() {
@@ -235,7 +255,7 @@ function refresh() {
   $('btnConnect').classList.toggle('hidden', on);
   $('btnCall').classList.toggle('hidden', !on || here || where === 'sending');
   $('btnCall').disabled = where === 'leaving';
-  for (const id of ['btnGame', 'btnSnack', 'btnPet', 'btnHome']) {
+  for (const id of ['btnGame', 'btnSnack', 'btnPet', 'btnHome', 'btnShop']) {
     $(id).classList.toggle('hidden', !here);
     $(id).disabled = !!game;
   }
@@ -250,6 +270,8 @@ function refresh() {
       (where === 'phone' && (delta.exp || delta.fun || delta.seeds) ? ` · 이번 나들이 보상: EXP +${delta.exp}, 재미 +${delta.fun}, 씨앗 +${delta.seeds}` : '');
   }
   drawDex(v ? v.dex : 1);
+  if (!here) $('shop').classList.add('hidden');
+  drawShop();
 }
 
 function dexTap(i) {
@@ -325,7 +347,7 @@ function loop(t) {
   }
   if (where === 'sending' && actor.x <= -PET) {
     where = 'home-pending';
-    link && link.send(`BACK exp=${delta.exp} fun=${delta.fun} food=${delta.food} energy=${delta.energy} seeds=${delta.seeds}`);
+    link && link.send(`BACK exp=${delta.exp} fun=${delta.fun} food=${delta.food} energy=${delta.energy} seeds=${delta.seeds} egg=${delta.egg}`);
     return;
   }
   drawPet(pet.sp, anim === 'happy' ? 'idle' : anim, fr, actor.x, GROUND + 8 - PET - (actor.anim === 'happy' ? (fr % 2) * 5 : 0), PET, flip);
@@ -401,6 +423,50 @@ addEventListener('keydown', e => {
   if (e.key === 'ArrowLeft') game.target = Math.max(0, game.x - 50);
   if (e.key === 'ArrowRight') game.target = Math.min(W - G, game.x + 50);
 });
+
+// ---------- 씨앗 상점 ----------
+const SHOP = [
+  { id: 'nutri', name: '🧪 성장 영양제', price: 15, desc: '아기 구마 EXP +25',
+    ok: v => v.sp === 0 && v.exp < v.evo, why: '아기 구마만 먹을 수 있어요',
+    use: () => { delta.exp += 25; act('eat', 1500); say('영양제를 먹고 쑥쑥 자라요! 🌱'); } },
+  { id: 'snack', name: '🍠 군고구마', price: 5, desc: '배부름 +30',
+    ok: v => v.food < 100, why: '배가 불러요',
+    use: () => { delta.food += 30; act('eat', 1800); say('따끈한 군고구마! 냠냠 🍠'); } },
+  { id: 'drink', name: '🧃 고구마 라떼', price: 8, desc: '에너지 +30',
+    ok: v => v.energy < 100, why: '이미 힘이 넘쳐요',
+    use: () => { delta.energy += 30; act('eat', 1500); say('기운이 솟아요! ⚡'); } },
+  { id: 'egg', name: '🥚 새 알', price: 40, desc: '지금 구마는 도감에 남기고, 집에서 새 아기 구마가 태어나요',
+    ok: v => v.sp !== 0 && !delta.egg, why: '성체가 된 구마만 새 알을 받을 수 있어요',
+    use: () => {
+      delta.egg = 1;
+      say('새 알을 받았어요! 구마가 집으로 가져갈게요 🥚');
+      setTimeout(sendHome, 1200);
+    },
+    confirm: v => `${SPECIES[v.sp].name}은(는) 도감에 남고, 집에 돌아가면 새 아기 구마가 태어나요. 정말 새 알을 살까요?` },
+];
+
+function drawShop() {
+  const v = view();
+  if (!v) return;
+  $('shopTitle').textContent = `씨앗 상점 · 내 씨앗 ${v.seeds}개`;
+  $('shopItems').innerHTML = SHOP.map(it => {
+    const can = it.ok(v), rich = v.seeds >= it.price;
+    const note = !can ? it.why : !rich ? `씨앗이 ${it.price - v.seeds}개 부족해요` : it.desc;
+    return `<div class="item"><b>${it.name}</b><button data-buy="${it.id}" ${can && rich && !game && where === 'phone' ? '' : 'disabled'}>🌰 ${it.price}</button><small>${note}</small></div>`;
+  }).join('');
+}
+
+function buy(id) {
+  const it = SHOP.find(x => x.id === id), v = view();
+  if (!it || !v || where !== 'phone' || !it.ok(v) || v.seeds < it.price) return;
+  if (it.confirm && !confirm(it.confirm(v))) return;
+  delta.seeds -= it.price;
+  it.use();
+  refresh();
+}
+
+$('shopItems').addEventListener('click', e => { const b = e.target.closest('[data-buy]'); if (b) buy(b.dataset.buy); });
+$('btnShop').onclick = () => { $('shop').classList.toggle('hidden'); drawShop(); if (!$('shop').classList.contains('hidden')) $('shop').scrollIntoView({ behavior: 'smooth', block: 'nearest' }); };
 
 // ---------- 버튼 ----------
 $('btnConnect').onclick = connect;
