@@ -162,6 +162,11 @@ async function connect() {
     await link.connect();
     $('conn').textContent = DEMO ? '데모 모드' : '연결됨'; $('conn').classList.add('on');
     await link.send('HELLO');
+    // 보드가 대답하지 않으면 한 번 더 묻고, 그래도 없으면 원인 안내
+    setTimeout(() => { if (link && !pet) link.send('HELLO'); }, 1500);
+    setTimeout(() => {
+      if (link && !pet) say('보드가 대답하지 않아요. 디스플레이에 아기 구마가 보이는지(새 펌웨어를 업로드했는지) 확인해 주세요.');
+    }, 3500);
   } catch (e) {
     link = null;
     say(e.name === 'NotFoundError' ? '기기를 선택하지 않았어요.' : '연결 실패: ' + e.message);
