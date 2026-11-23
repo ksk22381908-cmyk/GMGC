@@ -1,0 +1,413 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#2f5a2b">
+<title>구마 놀이터</title>
+<style>
+  :root {
+    --bg: #f4efe4; --card: #fffaf0; --ink: #3a2a22; --muted: #8a7768;
+    --accent: #b0548a; --accent-ink: #fff; --line: #e4d8c4;
+    --food: #5cb85c; --fun: #f08cc0; --energy: #5b9cff; --exp: #f0b429;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: var(--bg); color: var(--ink);
+    font-family: system-ui, -apple-system, "Apple SD Gothic Neo", "Malgun Gothic", sans-serif; }
+  body { padding: 12px 16px 32px; max-width: 520px; margin: 0 auto; -webkit-tap-highlight-color: transparent; }
+  header { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 10px; }
+  h1 { font-size: 20px; margin: 0; }
+  .pill { font-size: 12px; padding: 4px 10px; border-radius: 99px; background: #e9dfcf; color: var(--muted); white-space: nowrap; }
+  .pill.on { background: #d8f0d2; color: #2f6b2a; }
+  #stage { width: 100%; aspect-ratio: 3 / 2; display: block; border-radius: 14px; background: #aadcff;
+    image-rendering: pixelated; touch-action: none; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 12px; margin-top: 12px; }
+  .msg { min-height: 22px; text-align: center; font-size: 15px; margin-top: 8px; }
+  .stats { display: grid; grid-template-columns: auto 1fr auto; gap: 6px 10px; align-items: center; font-size: 14px; }
+  .bar { height: 10px; background: #eee3d2; border-radius: 99px; overflow: hidden; }
+  .bar > i { display: block; height: 100%; width: 0; border-radius: 99px; transition: width .3s; }
+  .num { font-variant-numeric: tabular-nums; color: var(--muted); font-size: 13px; min-width: 52px; text-align: right; }
+  .buttons { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 12px; }
+  button { font: inherit; font-size: 16px; padding: 14px 10px; border-radius: 12px; border: 1px solid var(--line);
+    background: var(--card); color: var(--ink); cursor: pointer; }
+  button.primary { background: var(--accent); color: var(--accent-ink); border-color: transparent; grid-column: 1 / -1; }
+  button:disabled { opacity: .45; cursor: default; }
+  .hidden { display: none !important; }
+  .dex { display: grid; grid-template-columns: repeat(auto-fill, minmax(64px, 1fr)); gap: 8px; text-align: center; font-size: 12px; }
+  .dex canvas { width: 100%; aspect-ratio: 1; background: #f0e6d6; border-radius: 10px; image-rendering: pixelated; }
+  .hint { font-size: 12px; color: var(--muted); margin: 8px 0 0; line-height: 1.5; }
+  h2 { font-size: 15px; margin: 0 0 8px; }
+  a { color: var(--accent); }
+</style>
+</head>
+<body>
+<header>
+  <h1>🍠 구마 놀이터</h1>
+  <span id="conn" class="pill">연결 안 됨</span>
+</header>
+
+<canvas id="stage" width="720" height="480"></canvas>
+<div id="msg" class="msg"></div>
+
+<div class="buttons">
+  <button id="btnConnect" class="primary">GuMaGoChi 연결하기</button>
+  <button id="btnCall" class="primary hidden">🏃 놀이터로 부르기</button>
+  <button id="btnGame" class="hidden">🐛 벌레 피하기</button>
+  <button id="btnSnack" class="hidden">🍠 간식 주기</button>
+  <button id="btnPet" class="hidden">🤚 쓰다듬기</button>
+  <button id="btnHome" class="hidden">🏠 집으로 보내기</button>
+</div>
+
+<div class="card">
+  <h2 id="petName">구마</h2>
+  <div class="stats">
+    <span>배부름</span><div class="bar"><i id="barFood" style="background:var(--food)"></i></div><span class="num" id="numFood">-</span>
+    <span>재미</span><div class="bar"><i id="barFun" style="background:var(--fun)"></i></div><span class="num" id="numFun">-</span>
+    <span>에너지</span><div class="bar"><i id="barEnergy" style="background:var(--energy)"></i></div><span class="num" id="numEnergy">-</span>
+    <span id="expLabel">성장</span><div class="bar"><i id="barExp" style="background:var(--exp)"></i></div><span class="num" id="numExp">-</span>
+  </div>
+  <p class="hint" id="extra"></p>
+</div>
+
+<div class="card">
+  <h2 id="dexTitle">도감</h2>
+  <div class="dex" id="dex"></div>
+  <p class="hint">아기 구마는 가장 많이 받은 돌봄(밥·놀이·잠)의 성향에 맞는 성체 중 하나로 진화해요. 미니게임도 놀이로 쳐요. 만난 구마를 눌러 보면 어떤 돌봄 성향인지 알 수 있어요.</p>
+</div>
+
+<p class="hint" id="noBle"></p>
+
+<script src="species.js"></script>
+<script>
+// ---------- 설정 ----------
+const NUS = '6e400001-b5a3-f393-e0a9-e50e24dcca9e';
+const NUS_RX = '6e400002-b5a3-f393-e0a9-e50e24dcca9e';  // 폰 -> 보드
+const NUS_TX = '6e400003-b5a3-f393-e0a9-e50e24dcca9e';  // 보드 -> 폰
+const ROW = { idle: 0, walk: 1, eat: 2, throw: 3, sleep: 4, dig: 5 };
+const W = 360, H = 240, GROUND = 196, PET = 64, G = 48;  // PET: 놀이터 크기, G: 미니게임 크기
+const DEMO = new URLSearchParams(location.search).has('demo');
+
+// ---------- 이미지 ----------
+const img = {};
+function loadImg(k, src) { return new Promise(r => { const i = new Image(); i.onload = () => { img[k] = i; r(); }; i.onerror = r; i.src = src; }); }
+const ready = Promise.all([...SPECIES.map(s => loadImg(s.key, `assets/${s.key}.png`)), loadImg('bug', 'assets/bug.png')]);
+
+// ---------- 상태 ----------
+let pet = null;                  // 보드에서 받은 상태
+let delta = { exp: 0, fun: 0, food: 0, energy: 0, seeds: 0 };  // 폰에 있는 동안 받은 보상
+let where = 'unknown';           // home | leaving | phone | sending
+let actor = { x: -PET, target: (W - PET) / 2, anim: 'idle', until: 0 };
+let game = null;
+let snacks = 0;
+const $ = id => document.getElementById(id);
+const clamp = v => Math.max(0, Math.min(100, v));
+
+function say(t) { $('msg').textContent = t; }
+
+// ---------- 블루투스 ----------
+class BleLink {
+  async connect() {
+    this.dev = await navigator.bluetooth.requestDevice({
+      filters: [{ services: [NUS] }, { namePrefix: 'GuMa' }, { namePrefix: 'MyPet' }],
+      optionalServices: [NUS],
+    });
+    this.dev.addEventListener('gattserverdisconnected', () => this.onClose && this.onClose());
+    const srv = await (await this.dev.gatt.connect()).getPrimaryService(NUS);
+    this.rx = await srv.getCharacteristic(NUS_RX);
+    const tx = await srv.getCharacteristic(NUS_TX);
+    let buf = '';
+    tx.addEventListener('characteristicvaluechanged', e => {
+      buf += new TextDecoder().decode(e.target.value);
+      let i;
+      while ((i = buf.indexOf('\n')) >= 0) { const line = buf.slice(0, i).trim(); buf = buf.slice(i + 1); if (line) this.onLine(line); }
+    });
+    await tx.startNotifications();
+  }
+  async send(line) {
+    const data = new TextEncoder().encode(line + '\n');
+    for (let i = 0; i < data.length; i += 20) await this.rx.writeValue(data.slice(i, i + 20));
+  }
+}
+
+// 보드 없이 화면을 시험해 보는 가짜 보드 (?demo 로 열기)
+class DemoLink {
+  constructor() { this.s = { sp: 0, food: 70, fun: 55, energy: 80, exp: 40, evo: 100, age: 600, seeds: 0, dex: 1, sleep: 0, where: 'home' }; }
+  async connect() {}
+  emit(l, ms = 50) { setTimeout(() => this.onLine(l), ms); }
+  async send(line) {
+    const s = this.s;
+    if (line === 'HELLO') this.emit('STATE ' + JSON.stringify(s));
+    if (line === 'CALL') { this.emit('LEAVING'); s.where = 'away'; this.emit('OUT ' + JSON.stringify(s), 1500); }
+    if (line.startsWith('BACK')) {
+      const g = k => +(line.match(new RegExp(k + '=(-?\\d+)')) || [0, 0])[1];
+      s.food = clamp(s.food + g('food')); s.fun = clamp(s.fun + g('fun')); s.energy = clamp(s.energy + g('energy'));
+      s.exp = Math.min(s.evo, s.exp + g('exp')); s.seeds += g('seeds'); s.where = 'returning';
+      this.emit('HOME ' + JSON.stringify(s));
+    }
+  }
+}
+
+let link = null;
+
+async function connect() {
+  try {
+    link = DEMO ? new DemoLink() : new BleLink();
+    link.onLine = onLine;
+    link.onClose = onDisconnected;
+    say('연결하는 중...');
+    await link.connect();
+    $('conn').textContent = DEMO ? '데모 모드' : '연결됨'; $('conn').classList.add('on');
+    await link.send('HELLO');
+  } catch (e) {
+    link = null;
+    say(e.name === 'NotFoundError' ? '기기를 선택하지 않았어요.' : '연결 실패: ' + e.message);
+  }
+}
+
+function onDisconnected() {
+  link = null;
+  $('conn').textContent = '연결 안 됨'; $('conn').classList.remove('on');
+  if (where === 'phone' || where === 'sending' || game) say('연결이 끊겨서 구마가 집으로 돌아갔어요.');
+  else say('연결이 끊겼어요.');
+  game = null; where = 'unknown'; actor.x = -PET; resetDelta();
+  refresh();
+}
+
+function onLine(line) {
+  const sp = line.indexOf(' ');
+  const cmd = sp < 0 ? line : line.slice(0, sp);
+  const body = sp < 0 ? '' : line.slice(sp + 1);
+  if (cmd === 'STATE' || cmd === 'OUT' || cmd === 'HOME') {
+    pet = JSON.parse(body);
+  }
+  if (cmd === 'STATE') {
+    if (where !== 'phone' && where !== 'sending') where = pet.where === 'away' ? 'phone' : 'home';
+    if (where === 'phone' && actor.x < 0) arrive();
+    if (where === 'home') say(pet.sleep ? '구마는 집에서 자고 있어요 💤' : '구마는 지금 집(화면)에 있어요.');
+  } else if (cmd === 'LEAVING') {
+    where = 'leaving'; say('구마가 화면 밖으로 걸어 나가는 중...');
+  } else if (cmd === 'OUT') {
+    arrive();
+  } else if (cmd === 'HOME') {
+    where = 'home'; resetDelta(); say('구마가 집으로 돌아갔어요. 화면을 보세요!');
+  } else if (cmd === 'NO') {
+    say(body === 'sleeping' ? '구마가 자고 있어서 못 나와요 💤' : '지금은 바빠요. 잠시 후 다시 불러 주세요.');
+    where = 'home';
+  }
+  refresh();
+}
+
+function arrive() {
+  where = 'phone'; snacks = 0;
+  actor = { x: -PET, target: (W - PET) / 2, anim: 'walk', until: 0 };
+  say('구마가 놀이터에 왔어요!');
+}
+
+function resetDelta() { delta = { exp: 0, fun: 0, food: 0, energy: 0, seeds: 0 }; }
+
+// 집으로 보내기: 왼쪽 밖으로 걸어 나간 뒤 보상과 함께 BACK 전송
+function sendHome() {
+  if (where !== 'phone') return;
+  where = 'sending'; actor.target = -PET - 10; say('구마가 집으로 가는 중...');
+  refresh();
+}
+
+function act(anim, ms) { actor.anim = anim; actor.until = performance.now() + ms; }
+
+function view() {
+  if (!pet) return null;
+  return { ...pet, food: clamp(pet.food + delta.food), fun: clamp(pet.fun + delta.fun),
+    energy: clamp(pet.energy + delta.energy), exp: Math.min(pet.evo, pet.exp + delta.exp), seeds: pet.seeds + delta.seeds };
+}
+
+// ---------- 화면 갱신 ----------
+function refresh() {
+  const on = !!link, here = where === 'phone';
+  $('btnConnect').classList.toggle('hidden', on);
+  $('btnCall').classList.toggle('hidden', !on || here || where === 'sending');
+  $('btnCall').disabled = where === 'leaving';
+  for (const id of ['btnGame', 'btnSnack', 'btnPet', 'btnHome']) {
+    $(id).classList.toggle('hidden', !here);
+    $(id).disabled = !!game;
+  }
+  const v = view();
+  if (v) {
+    $('petName').textContent = SPECIES[v.sp].name + (where === 'phone' ? ' · 놀이터에 있음' : ' · 집에 있음');
+    const set = (k, val, max = 100) => { $('bar' + k).style.width = (val / max * 100) + '%'; $('num' + k).textContent = val + (max === 100 ? '' : '/' + max); };
+    set('Food', v.food); set('Fun', v.fun); set('Energy', v.energy);
+    if (v.sp === 0) { $('expLabel').textContent = '성장'; set('Exp', v.exp, v.evo); }
+    else { $('expLabel').textContent = '씨앗'; $('barExp').style.width = Math.min(100, v.seeds) + '%'; $('numExp').textContent = v.seeds + '개'; }
+    $('extra').textContent = `나이 ${Math.floor(v.age / 60)}분` + (v.sp === 0 ? ` · 씨앗 ${v.seeds}개` : '') +
+      (where === 'phone' && (delta.exp || delta.fun || delta.seeds) ? ` · 이번 나들이 보상: EXP +${delta.exp}, 재미 +${delta.fun}, 씨앗 +${delta.seeds}` : '');
+  }
+  drawDex(v ? v.dex : 1);
+}
+
+function dexTap(i) {
+  const v = view(), seen = v && (v.dex & (1 << i));
+  if (!seen) say('아직 만나지 못한 구마예요.');
+  else say(i === 0 ? '모든 구마의 시작, 아기 구마예요.' : `${SPECIES[i].name}: ${SPECIES[i].care}을(를) 많이 받으면 나올 수 있어요.`);
+}
+
+function drawDex(mask) {
+  const box = $('dex');
+  if (!box.children.length) box.innerHTML = SPECIES.map((s, i) => `<div onclick="dexTap(${i})"><canvas width="96" height="96" id="dex${i}"></canvas><div id="dexn${i}"></div></div>`).join('');
+  let found = 0;
+  SPECIES.forEach((s, i) => {
+    const c = $('dex' + i).getContext('2d'), seen = mask & (1 << i);
+    if (seen) found++;
+    c.clearRect(0, 0, 96, 96); c.imageSmoothingEnabled = false;
+    if (img[s.key]) {
+      c.globalAlpha = 1; c.filter = seen ? 'none' : 'brightness(0) opacity(0.25)';
+      const cw = img[s.key].width / 4, ch = img[s.key].height / 6;
+      c.drawImage(img[s.key], 0, 0, cw, ch, 0, 0, 96, 96); c.filter = 'none';
+    }
+    $('dexn' + i).textContent = seen ? s.name : '???';
+  });
+  $('dexTitle').textContent = `도감 ${found}/${SPECIES.length}`;
+}
+
+// ---------- 그리기 ----------
+const ctx = $('stage').getContext('2d');
+ctx.scale(2, 2);  // 고해상도 화면에서 선명하게
+ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = 'high';
+
+function drawBg(t) {
+  ctx.fillStyle = '#aadcff'; ctx.fillRect(0, 0, W, H);
+  ctx.fillStyle = '#fff';
+  const cx = (t / 120) % (W + 80) - 40;
+  ctx.beginPath(); ctx.roundRect(cx, 22, 60, 16, 8); ctx.fill();
+  ctx.beginPath(); ctx.roundRect((cx + 200) % (W + 80) - 40, 44, 44, 12, 6); ctx.fill();
+  ctx.fillStyle = '#60aa48'; ctx.fillRect(0, GROUND - 16, W, H - GROUND + 16);
+  ctx.fillStyle = '#785438'; ctx.fillRect(0, GROUND + 6, W, H - GROUND);
+  ctx.fillStyle = '#3e7c34';
+  for (let x = 6; x < W; x += 22) { ctx.fillRect(x, GROUND - 20, 2, 4); ctx.fillRect(x + 4, GROUND - 22, 2, 6); }
+}
+
+// 걷기 그림은 오른쪽을 보므로 왼쪽으로 갈 땐 좌우를 뒤집는다
+function drawPet(sp, anim, frame, x, y, size = PET, flip = false) {
+  const s = img[SPECIES[sp].key]; if (!s) return;
+  const cw = s.width / 4, ch = s.height / 6;
+  ctx.save();
+  ctx.translate(Math.round(x) + (flip ? size : 0), Math.round(y));
+  if (flip) ctx.scale(-1, 1);
+  ctx.drawImage(s, frame * cw, ROW[anim] * ch, cw, ch, 0, 0, size, size);
+  ctx.restore();
+}
+
+function loop(t) {
+  requestAnimationFrame(loop);
+  drawBg(t);
+  const fr = Math.floor(t / 220) % 4;
+  if (game) { stepGame(t, fr); return; }
+  if (!pet || (where !== 'phone' && where !== 'sending')) {
+    ctx.fillStyle = 'rgba(58,42,34,.75)'; ctx.font = '15px system-ui, sans-serif'; ctx.textAlign = 'center';
+    ctx.fillText(where === 'leaving' ? '구마가 오는 중...' : pet ? '구마는 집(화면)에 있어요' : '보드와 연결해 주세요', W / 2, 96);
+    return;
+  }
+  // 이동
+  let anim = actor.anim, flip = false;
+  if (actor.until && t > actor.until) { actor.until = 0; actor.anim = 'idle'; anim = 'idle'; }
+  if (Math.abs(actor.x - actor.target) > 1) {
+    anim = 'walk'; flip = actor.target < actor.x;
+    actor.x += Math.sign(actor.target - actor.x) * Math.min(2.4, Math.abs(actor.target - actor.x));
+  } else if (where === 'phone' && !actor.until && Math.random() < 0.004) {
+    actor.target = 20 + Math.random() * (W - PET - 40);  // 가끔 어슬렁
+  }
+  if (where === 'sending' && actor.x <= -PET) {
+    where = 'home-pending';
+    link && link.send(`BACK exp=${delta.exp} fun=${delta.fun} food=${delta.food} energy=${delta.energy} seeds=${delta.seeds}`);
+    return;
+  }
+  drawPet(pet.sp, anim === 'happy' ? 'idle' : anim, fr, actor.x, GROUND + 8 - PET - (actor.anim === 'happy' ? (fr % 2) * 5 : 0), PET, flip);
+}
+
+// ---------- 미니게임: 벌레 피하기 ----------
+function startGame() {
+  if (where !== 'phone') return;
+  const v = view();
+  if (v.energy < 15) { say('구마가 너무 피곤해요. 간식을 주거나 집에서 재워 주세요.'); return; }
+  game = { start: performance.now(), x: (W - G) / 2, target: (W - G) / 2, bugs: [], score: 0, lives: 3, hurtUntil: 0, nextBug: 0, over: 0 };
+  say('화면을 터치한 채로 좌우로 움직여 벌레를 피하세요!');
+  refresh();
+}
+
+function stepGame(t, fr) {
+  const g = game, size = G, dur = 30000;
+  const el = t - g.start;
+  if (!g.over) {
+    if (el > dur || g.lives <= 0) endGame(t);
+    if (t > g.nextBug) {
+      const speed = 1.6 + el / 12000;
+      g.bugs.push({ x: Math.random() * (W - 28), y: -30, vy: speed + Math.random() * 1.2 });
+      g.nextBug = t + Math.max(320, 900 - el / 40);
+    }
+    g.x += Math.sign(g.target - g.x) * Math.min(5, Math.abs(g.target - g.x));
+  }
+  for (const b of g.bugs) {
+    if (!g.over) b.y += b.vy;
+    const bx = b.x + 14, by = b.y + 14, px = g.x + size / 2, py = GROUND - size / 2;
+    if (!b.hit && !g.over && Math.abs(bx - px) < 24 && Math.abs(by - py) < 24 && t > g.hurtUntil) {
+      b.hit = true; g.lives--; g.hurtUntil = t + 900;
+      if (navigator.vibrate) navigator.vibrate(80);
+    }
+    if (!b.counted && b.y > GROUND) { b.counted = true; if (!b.hit) g.score++; }
+    const bs = img.bug, f = Math.floor(t / 90) % 8;
+    if (bs && !b.hit) ctx.drawImage(bs, f * bs.width / 8, 0, bs.width / 8, bs.height, b.x, b.y, 28, 28);
+  }
+  g.bugs = g.bugs.filter(b => b.y < H + 10 && !b.hit);
+  const moving = Math.abs(g.target - g.x) > 2;
+  if (!(t < g.hurtUntil && Math.floor(t / 100) % 2)) drawPet(pet.sp, moving ? 'walk' : 'idle', fr, g.x, GROUND + 6 - size, size, moving && g.target < g.x);
+  // HUD
+  ctx.fillStyle = 'rgba(255,255,255,.85)'; ctx.beginPath(); ctx.roundRect(8, 8, W - 16, 28, 8); ctx.fill();
+  ctx.fillStyle = '#3a2a22'; ctx.font = 'bold 15px system-ui, sans-serif'; ctx.textAlign = 'left';
+  ctx.fillText(`점수 ${g.score}`, 18, 28);
+  ctx.textAlign = 'center'; ctx.fillText('❤'.repeat(Math.max(0, g.lives)) + '♡'.repeat(3 - Math.max(0, g.lives)), W / 2, 28);
+  ctx.textAlign = 'right'; ctx.fillText(`${Math.max(0, Math.ceil((dur - el) / 1000))}초`, W - 18, 28);
+  if (g.over) {
+    ctx.fillStyle = 'rgba(0,0,0,.45)'; ctx.fillRect(0, 0, W, H);
+    ctx.fillStyle = '#fff'; ctx.textAlign = 'center'; ctx.font = 'bold 22px system-ui, sans-serif';
+    ctx.fillText(g.lives > 0 ? '끝까지 버텼어요!' : '벌레에 잡혔어요', W / 2, 96);
+    ctx.font = '16px system-ui, sans-serif';
+    ctx.fillText(`EXP +${g.reward.exp} · 재미 +${g.reward.fun} · 씨앗 +${g.reward.seeds}`, W / 2, 128);
+    if (t - g.over > 2200) { game = null; act('happy', 1500); refresh(); }
+  }
+}
+
+function endGame(t) {
+  const g = game;
+  const bonus = g.lives > 0 ? 5 : 0;
+  g.reward = { exp: Math.min(40, g.score * 2 + bonus), fun: Math.min(35, 8 + g.score), seeds: Math.floor(g.score / 5) + (bonus ? 1 : 0) };
+  delta.exp += g.reward.exp; delta.fun += g.reward.fun; delta.seeds += g.reward.seeds; delta.energy -= 10; delta.food -= 5;
+  g.over = t;
+  say(`점수 ${g.score}! 보상은 구마가 집에 돌아갈 때 함께 가져가요.`);
+  refresh();
+}
+
+function pointerX(e) { const r = $('stage').getBoundingClientRect(); return (e.clientX - r.left) / r.width * W; }
+$('stage').addEventListener('pointerdown', e => { if (game) { $('stage').setPointerCapture(e.pointerId); game.target = Math.max(0, Math.min(W - G, pointerX(e) - G / 2)); } });
+$('stage').addEventListener('pointermove', e => { if (game && e.buttons) game.target = Math.max(0, Math.min(W - G, pointerX(e) - G / 2)); });
+addEventListener('keydown', e => {
+  if (!game) return;
+  if (e.key === 'ArrowLeft') game.target = Math.max(0, game.x - 50);
+  if (e.key === 'ArrowRight') game.target = Math.min(W - G, game.x + 50);
+});
+
+// ---------- 버튼 ----------
+$('btnConnect').onclick = connect;
+$('btnCall').onclick = () => { if (link) { link.send('CALL'); say('구마를 부르는 중...'); } };
+$('btnHome').onclick = sendHome;
+$('btnGame').onclick = startGame;
+$('btnSnack').onclick = () => {
+  if (snacks >= 3) { say('간식은 한 번 놀러 올 때 3개까지만 줄 수 있어요.'); return; }
+  snacks++; delta.food += 10; delta.energy += 5; act('eat', 1800); say('냠냠! 맛있어요 🍠'); refresh();
+};
+$('btnPet').onclick = () => { delta.fun += 2; act('happy', 1200); say('구마가 좋아해요 💕'); refresh(); };
+
+if (!DEMO && !navigator.bluetooth) {
+  $('noBle').innerHTML = '이 브라우저는 블루투스를 지원하지 않아요. 갤럭시에서는 <b>Chrome</b>으로 열어 주세요. 보드 없이 화면만 보려면 <a href="?demo">데모 모드</a>로 열어 보세요.';
+}
+ready.then(() => { refresh(); requestAnimationFrame(loop); });
+</script>
+</body>
+</html>
