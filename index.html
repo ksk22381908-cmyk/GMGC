@@ -40,6 +40,10 @@
   .item { display: grid; grid-template-columns: 1fr auto; gap: 4px 10px; align-items: center;
     padding: 10px 0; border-top: 1px solid var(--line); }
   .item:first-child { border-top: 0; }
+  .evo { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; text-align: center; }
+  .evo canvas { width: 100%; aspect-ratio: 1; background: #f0e6d6; border-radius: 12px; }
+  .evo b { display: block; margin: 6px 0; }
+  .evo button { width: 100%; padding: 10px; font-size: 14px; }
   .item b { font-size: 15px; }
   .item small { color: var(--muted); grid-column: 1; }
   .item button { grid-row: 1 / span 2; grid-column: 2; padding: 10px 14px; font-size: 14px; white-space: nowrap; }
@@ -59,10 +63,17 @@
   <button id="btnConnect" class="primary">GuMaGoChi 연결하기</button>
   <button id="btnCall" class="primary hidden">🏃 놀이터로 부르기</button>
   <button id="btnGame" class="hidden">🐛 벌레 피하기</button>
+  <button id="btnRun" class="hidden">🏃 밭 달리기</button>
   <button id="btnSnack" class="hidden">🍠 간식 주기</button>
   <button id="btnPet" class="hidden">🤚 쓰다듬기</button>
   <button id="btnHome" class="hidden">🏠 집으로 보내기</button>
   <button id="btnShop" class="hidden" style="grid-column: 1 / -1">🛒 씨앗 상점</button>
+</div>
+
+<div class="card hidden" id="evoCard">
+  <h2>✨ 2차 진화 준비 완료!</h2>
+  <div class="evo" id="evoChoices"></div>
+  <p class="hint">고른 모습으로 집(화면)에서 진화해요. 한 번 진화하면 되돌릴 수 없어요.</p>
 </div>
 
 <div class="card hidden" id="shop">
@@ -85,7 +96,7 @@
 <div class="card">
   <h2 id="dexTitle">도감</h2>
   <div class="dex" id="dex"></div>
-  <p class="hint">아기 구마는 가장 많이 받은 돌봄(밥·놀이·잠)의 성향에 맞는 성체 중 하나로 진화해요. 미니게임도 놀이로 쳐요. 만난 구마를 눌러 보면 어떤 돌봄 성향인지 알 수 있어요.</p>
+  <p class="hint">아기 구마는 가장 많이 받은 돌봄(밥·놀이·잠)의 성향에 맞는 성체 중 하나로 진화해요. 미니게임도 놀이로 쳐요. 만난 구마를 눌러 보면 어떤 돌봄 성향인지 알 수 있어요. 일부 성체는 EXP를 더 모으면 두 갈래 중 하나로 2차 진화해요.</p>
 </div>
 
 <p class="hint" id="noBle"></p>
@@ -107,7 +118,7 @@ const ready = Promise.all([...SPECIES.map(s => loadImg(s.key, `assets/${s.key}.p
 
 // ---------- 상태 ----------
 let pet = null;                  // 보드에서 받은 상태
-let delta = { exp: 0, fun: 0, food: 0, energy: 0, seeds: 0, egg: 0 };  // 폰에 있는 동안 받은 보상
+let delta = { exp: 0, fun: 0, food: 0, energy: 0, seeds: 0, egg: 0, evo: -1 };  // 폰에 있는 동안 받은 보상
 let where = 'unknown';           // home | leaving | phone | sending
 let actor = { x: -PET, target: (W - PET) / 2, anim: 'idle', until: 0 };
 let game = null;
@@ -115,6 +126,10 @@ let snacks = 0;
 let lastSp = -1;
 const $ = id => document.getElementById(id);
 const clamp = v => Math.max(0, Math.min(100, v));
+// 도감은 보드가 16진수 문자열로 보낸다 (37종 > 32비트)
+const dexBig = d => typeof d === 'string' ? BigInt('0x' + d) : BigInt(d || 1);
+const isSeen = (d, i) => ((dexBig(d) >> BigInt(i)) & 1n) === 1n;
+const childrenOf = sp => SPECIES.map((s, i) => s.parent === sp ? i : -1).filter(i => i >= 0);
 
 function say(t) { $('msg').textContent = t; }
 
@@ -146,17 +161,27 @@ class BleLink {
 // 보드 없이 화면을 시험해 보는 가짜 보드 (?demo 로 열기)
 class DemoLink {
   constructor() { this.s = { sp: 0, food: 70, fun: 55, energy: 80, exp: 40, evo: 100, age: 600, seeds: 0, dex: 1, sleep: 0, where: 'home' }; }
+  evolve(to) {
+    const s = this.s;
+    setTimeout(() => {
+      s.sp = to; s.exp = 0; s.evo = childrenOf(to).length ? 150 : 0;
+      s.dex = (dexBig(s.dex) | (1n << BigInt(to))).toString(16);
+      this.emit('STATE ' + JSON.stringify(s));
+    }, 3500);
+  }
   async connect() {}
   emit(l, ms = 50) { setTimeout(() => this.onLine(l), ms); }
   async send(line) {
     const s = this.s;
     if (line === 'HELLO') this.emit('STATE ' + JSON.stringify(s));
+    if (line.startsWith('EVOLVE ')) this.evolve(+line.slice(7));
     if (line === 'CALL') { this.emit('LEAVING'); s.where = 'away'; this.emit('OUT ' + JSON.stringify(s), 1500); }
     if (line.startsWith('BACK')) {
       const g = k => +(line.match(new RegExp(k + '=(-?\\d+)')) || [0, 0])[1];
       s.food = clamp(s.food + g('food')); s.fun = clamp(s.fun + g('fun')); s.energy = clamp(s.energy + g('energy'));
       s.exp = Math.min(s.evo, s.exp + g('exp')); s.seeds = Math.max(0, s.seeds + g('seeds')); s.where = 'returning';
       this.emit('HOME ' + JSON.stringify(s));
+      if (line.includes('evo=') && g('evo') >= 0) this.evolve(g('evo'));
       if (g('egg') && s.sp) setTimeout(() => { Object.assign(s, { sp: 0, exp: 0, food: 80, fun: 80, energy: 80, gen: (s.gen || 1) + 1 }); this.emit('STATE ' + JSON.stringify(s)); }, 6000);
     }
   }
@@ -208,7 +233,7 @@ function onLine(line) {
     if (where !== 'phone' && where !== 'sending') where = pet.where === 'away' ? 'phone' : 'home';
     if (where === 'phone' && actor.x < 0) arrive();
     if (pet.sp === 0 && lastSp > 0) say('집에서 새 아기 구마가 태어났어요! 🐣');
-    else if (pet.sp > 0 && lastSp === 0) say(`집에서 ${SPECIES[pet.sp].name}(으)로 진화했어요! ✨`);
+    else if (pet.sp > 0 && lastSp >= 0 && pet.sp !== lastSp) say(`집에서 ${SPECIES[pet.sp].name}(으)로 진화했어요! ✨`);
     else if (where === 'home') say(pet.sleep ? '구마는 집에서 자고 있어요 💤' : '구마는 지금 집(화면)에 있어요.');
     lastSp = pet.sp;
   } else if (cmd === 'LEAVING') {
@@ -220,8 +245,10 @@ function onLine(line) {
     lastSp = pet.sp;
     where = 'home'; resetDelta(); say('구마가 집으로 돌아갔어요. 화면을 보세요!');
   } else if (cmd === 'NO') {
-    say(body === 'sleeping' ? '구마가 자고 있어서 못 나와요 💤' : '지금은 바빠요. 잠시 후 다시 불러 주세요.');
-    where = 'home';
+    say(body === 'sleeping' ? '구마가 자고 있어서 못 나와요 💤'
+      : body === 'evolve' ? '지금은 진화할 수 없어요. 구마가 깨어 있고 집에 있을 때 다시 해 보세요.'
+      : '지금은 바빠요. 잠시 후 다시 불러 주세요.');
+    if (body !== 'evolve') where = 'home';
   }
   refresh();
 }
@@ -232,7 +259,7 @@ function arrive() {
   say('구마가 놀이터에 왔어요!');
 }
 
-function resetDelta() { delta = { exp: 0, fun: 0, food: 0, energy: 0, seeds: 0, egg: 0 }; }
+function resetDelta() { delta = { exp: 0, fun: 0, food: 0, energy: 0, seeds: 0, egg: 0, evo: -1 }; }
 
 // 집으로 보내기: 왼쪽 밖으로 걸어 나간 뒤 보상과 함께 BACK 전송
 function sendHome() {
@@ -246,7 +273,7 @@ function act(anim, ms) { actor.anim = anim; actor.until = performance.now() + ms
 function view() {
   if (!pet) return null;
   return { ...pet, food: clamp(pet.food + delta.food), fun: clamp(pet.fun + delta.fun),
-    energy: clamp(pet.energy + delta.energy), exp: Math.min(pet.evo, pet.exp + delta.exp), seeds: pet.seeds + delta.seeds };
+    energy: clamp(pet.energy + delta.energy), exp: pet.evo ? Math.min(pet.evo, pet.exp + delta.exp) : pet.exp, seeds: pet.seeds + delta.seeds };
 }
 
 // ---------- 화면 갱신 ----------
@@ -255,7 +282,7 @@ function refresh() {
   $('btnConnect').classList.toggle('hidden', on);
   $('btnCall').classList.toggle('hidden', !on || here || where === 'sending');
   $('btnCall').disabled = where === 'leaving';
-  for (const id of ['btnGame', 'btnSnack', 'btnPet', 'btnHome', 'btnShop']) {
+  for (const id of ['btnGame', 'btnRun', 'btnSnack', 'btnPet', 'btnHome', 'btnShop']) {
     $(id).classList.toggle('hidden', !here);
     $(id).disabled = !!game;
   }
@@ -264,20 +291,23 @@ function refresh() {
     $('petName').textContent = SPECIES[v.sp].name + (where === 'phone' ? ' · 놀이터에 있음' : ' · 집에 있음');
     const set = (k, val, max = 100) => { $('bar' + k).style.width = (val / max * 100) + '%'; $('num' + k).textContent = val + (max === 100 ? '' : '/' + max); };
     set('Food', v.food); set('Fun', v.fun); set('Energy', v.energy);
-    if (v.sp === 0) { $('expLabel').textContent = '성장'; set('Exp', v.exp, v.evo); }
+    if (v.evo > 0) { $('expLabel').textContent = v.sp === 0 ? '성장' : '진화'; set('Exp', v.exp, v.evo); }
     else { $('expLabel').textContent = '씨앗'; $('barExp').style.width = Math.min(100, v.seeds) + '%'; $('numExp').textContent = v.seeds + '개'; }
-    $('extra').textContent = `나이 ${Math.floor(v.age / 60)}분` + (v.sp === 0 ? ` · 씨앗 ${v.seeds}개` : '') +
+    $('extra').textContent = `나이 ${Math.floor(v.age / 60)}분 · ${v.gen || 1}번째 구마` + (v.evo > 0 ? ` · 씨앗 ${v.seeds}개` : '') +
       (where === 'phone' && (delta.exp || delta.fun || delta.seeds) ? ` · 이번 나들이 보상: EXP +${delta.exp}, 재미 +${delta.fun}, 씨앗 +${delta.seeds}` : '');
   }
   drawDex(v ? v.dex : 1);
+  drawEvoChoices(v);
   if (!here) $('shop').classList.add('hidden');
   drawShop();
 }
 
 function dexTap(i) {
-  const v = view(), seen = v && (v.dex & (1 << i));
-  if (!seen) say('아직 만나지 못한 구마예요.');
-  else say(i === 0 ? '모든 구마의 시작, 아기 구마예요.' : `${SPECIES[i].name}: ${SPECIES[i].care}을(를) 많이 받으면 나올 수 있어요.`);
+  const v = view(), seen = v && isSeen(v.dex, i), s = SPECIES[i];
+  if (!seen) say(s.stage === 2 ? `아직 만나지 못한 구마예요. ${SPECIES[s.parent].name}의 2차 진화예요.` : '아직 만나지 못한 구마예요.');
+  else if (i === 0) say('모든 구마의 시작, 아기 구마예요.');
+  else if (s.stage === 2) say(`${s.name}: ${SPECIES[s.parent].name}이(가) 2차 진화하면 고를 수 있어요.`);
+  else say(`${s.name}: ${s.care}을(를) 많이 받으면 나올 수 있어요.` + (childrenOf(i).length ? ' 2차 진화도 있어요.' : ''));
 }
 
 function drawDex(mask) {
@@ -285,7 +315,7 @@ function drawDex(mask) {
   if (!box.children.length) box.innerHTML = SPECIES.map((s, i) => `<div onclick="dexTap(${i})"><canvas width="96" height="96" id="dex${i}"></canvas><div id="dexn${i}"></div></div>`).join('');
   let found = 0;
   SPECIES.forEach((s, i) => {
-    const c = $('dex' + i).getContext('2d'), seen = mask & (1 << i);
+    const c = $('dex' + i).getContext('2d'), seen = isSeen(mask, i);
     if (seen) found++;
     c.clearRect(0, 0, 96, 96); c.imageSmoothingEnabled = false;
     if (img[s.key]) {
@@ -297,6 +327,38 @@ function drawDex(mask) {
   });
   $('dexTitle').textContent = `도감 ${found}/${SPECIES.length}`;
 }
+
+// ---------- 2차 진화 선택 ----------
+let evoShownFor = -1;
+function drawEvoChoices(v) {
+  const kids = v ? childrenOf(v.sp) : [];
+  const show = v && kids.length && v.evo > 0 && v.exp >= v.evo && delta.evo < 0 && !game &&
+    (where === 'phone' || where === 'home') && !v.sleep;
+  $('evoCard').classList.toggle('hidden', !show);
+  if (!show) { evoShownFor = -1; return; }
+  if (evoShownFor === v.sp) return;
+  evoShownFor = v.sp;
+  $('evoChoices').innerHTML = kids.map(i => `<div><canvas width="128" height="128" id="evo${i}"></canvas><b>${SPECIES[i].name}</b><button data-evo="${i}">이 모습으로 진화</button></div>`).join('');
+  kids.forEach(i => {
+    const c = $('evo' + i).getContext('2d'), im = img[SPECIES[i].key];
+    if (im) c.drawImage(im, 0, 0, im.width / 4, im.height / 6, 0, 0, 128, 128);
+  });
+}
+
+function chooseEvo(i) {
+  const v = view();
+  if (!v || !confirm(`${SPECIES[v.sp].name}을(를) ${SPECIES[i].name}(으)로 진화시킬까요? 되돌릴 수 없어요.`)) return;
+  if (where === 'phone') {
+    delta.evo = i;
+    say(`좋아요! 집에 가서 ${SPECIES[i].name}(으)로 진화할게요 ✨`);
+    setTimeout(sendHome, 1000);
+  } else if (link) {
+    link.send(`EVOLVE ${i}`);
+    say('화면을 보세요! 진화가 시작돼요 ✨');
+  }
+  refresh();
+}
+$('evoChoices').addEventListener('click', e => { const b = e.target.closest('[data-evo]'); if (b) chooseEvo(+b.dataset.evo); });
 
 // ---------- 그리기 ----------
 const ctx = $('stage').getContext('2d');
@@ -347,7 +409,7 @@ function loop(t) {
   }
   if (where === 'sending' && actor.x <= -PET) {
     where = 'home-pending';
-    link && link.send(`BACK exp=${delta.exp} fun=${delta.fun} food=${delta.food} energy=${delta.energy} seeds=${delta.seeds} egg=${delta.egg}`);
+    link && link.send(`BACK exp=${delta.exp} fun=${delta.fun} food=${delta.food} energy=${delta.energy} seeds=${delta.seeds} egg=${delta.egg} evo=${delta.evo}`);
     return;
   }
   drawPet(pet.sp, anim === 'happy' ? 'idle' : anim, fr, actor.x, GROUND + 8 - PET - (actor.anim === 'happy' ? (fr % 2) * 5 : 0), PET, flip);
@@ -363,7 +425,54 @@ function startGame() {
   refresh();
 }
 
+// ---------- 미니게임: 밭 달리기 (터치해서 점프) ----------
+const RUN_X = 56;
+function startRun() {
+  if (where !== 'phone') return;
+  if (view().energy < 15) { say('구마가 너무 피곤해요. 간식을 주거나 집에서 재워 주세요.'); return; }
+  game = { type: 'run', start: performance.now(), h: 0, vh: 0, bugs: [], score: 0, lives: 3, hurtUntil: 0, nextBug: performance.now() + 1200, over: 0, last: 0 };
+  say('화면을 터치해서 점프! 다가오는 벌레를 뛰어넘으세요.');
+  refresh();
+}
+
+function jump() { if (game && game.type === 'run' && !game.over && game.h === 0) game.vh = 8.6; }
+
+function stepRun(t, fr) {
+  const g = game, dur = 30000, el = t - g.start;
+  const k = g.last ? Math.min(3, (t - g.last) / 16.7) : 1;  // 화면 주사율이 달라도 같은 속도
+  g.last = t;
+  if (!g.over) {
+    if (el > dur || g.lives <= 0) endGame(t);
+    const speed = 3 + el / 9000;
+    if (t > g.nextBug) {
+      g.bugs.push({ x: W + 10 });
+      g.nextBug = t + Math.max(650, 1500 - el / 30) + Math.random() * 500;
+    }
+    for (const b of g.bugs) b.x -= speed * k;
+    g.h += g.vh * k; g.vh -= 0.42 * k;
+    if (g.h <= 0) { g.h = 0; g.vh = 0; }
+  }
+  // 땅이 흘러가는 느낌
+  ctx.fillStyle = '#3e7c34';
+  const off = ((t - g.start) * 0.18) % 22;
+  for (let x = -off; x < W; x += 22) ctx.fillRect(x, GROUND + 10, 3, 3);
+  for (const b of g.bugs) {
+    const hitX = b.x < RUN_X + G - 12 && b.x + 26 > RUN_X + 12;
+    if (!b.hit && !g.over && hitX && g.h < 20 && t > g.hurtUntil) {
+      b.hit = true; g.lives--; g.hurtUntil = t + 900;
+      if (navigator.vibrate) navigator.vibrate(80);
+    }
+    if (!b.counted && b.x + 26 < RUN_X) { b.counted = true; if (!b.hit) g.score++; }
+    const bs = img.bug, f = Math.floor(t / 90) % 8;
+    if (bs && !b.hit) ctx.drawImage(bs, f * bs.width / 8, 0, bs.width / 8, bs.height, b.x, GROUND - 22, 30, 30);
+  }
+  g.bugs = g.bugs.filter(b => b.x > -40 && !b.hit);
+  if (!(t < g.hurtUntil && Math.floor(t / 100) % 2)) drawPet(pet.sp, 'walk', fr, RUN_X, GROUND + 6 - G - g.h, G);
+  drawHud(g, t, dur, '벌레에 부딪혔어요');
+}
+
 function stepGame(t, fr) {
+  if (game.type === 'run') { stepRun(t, fr); return; }
   const g = game, size = G, dur = 30000;
   const el = t - g.start;
   if (!g.over) {
@@ -389,7 +498,11 @@ function stepGame(t, fr) {
   g.bugs = g.bugs.filter(b => b.y < H + 10 && !b.hit);
   const moving = Math.abs(g.target - g.x) > 2;
   if (!(t < g.hurtUntil && Math.floor(t / 100) % 2)) drawPet(pet.sp, moving ? 'walk' : 'idle', fr, g.x, GROUND + 6 - size, size, moving && g.target < g.x);
-  // HUD
+  drawHud(g, t, dur, '벌레에 잡혔어요');
+}
+
+function drawHud(g, t, dur, lostText) {
+  const el = t - g.start;
   ctx.fillStyle = 'rgba(255,255,255,.85)'; ctx.beginPath(); ctx.roundRect(8, 8, W - 16, 28, 8); ctx.fill();
   ctx.fillStyle = '#3a2a22'; ctx.font = 'bold 15px system-ui, sans-serif'; ctx.textAlign = 'left';
   ctx.fillText(`점수 ${g.score}`, 18, 28);
@@ -398,7 +511,7 @@ function stepGame(t, fr) {
   if (g.over) {
     ctx.fillStyle = 'rgba(0,0,0,.45)'; ctx.fillRect(0, 0, W, H);
     ctx.fillStyle = '#fff'; ctx.textAlign = 'center'; ctx.font = 'bold 22px system-ui, sans-serif';
-    ctx.fillText(g.lives > 0 ? '끝까지 버텼어요!' : '벌레에 잡혔어요', W / 2, 96);
+    ctx.fillText(g.lives > 0 ? '끝까지 버텼어요!' : lostText, W / 2, 96);
     ctx.font = '16px system-ui, sans-serif';
     ctx.fillText(`EXP +${g.reward.exp} · 재미 +${g.reward.fun} · 씨앗 +${g.reward.seeds}`, W / 2, 128);
     if (t - g.over > 2200) { game = null; act('happy', 1500); refresh(); }
@@ -416,18 +529,19 @@ function endGame(t) {
 }
 
 function pointerX(e) { const r = $('stage').getBoundingClientRect(); return (e.clientX - r.left) / r.width * W; }
-$('stage').addEventListener('pointerdown', e => { if (game) { $('stage').setPointerCapture(e.pointerId); game.target = Math.max(0, Math.min(W - G, pointerX(e) - G / 2)); } });
-$('stage').addEventListener('pointermove', e => { if (game && e.buttons) game.target = Math.max(0, Math.min(W - G, pointerX(e) - G / 2)); });
+$('stage').addEventListener('pointerdown', e => { if (game && game.type === 'run') { jump(); return; } if (game) { $('stage').setPointerCapture(e.pointerId); game.target = Math.max(0, Math.min(W - G, pointerX(e) - G / 2)); } });
+$('stage').addEventListener('pointermove', e => { if (game && game.type !== 'run' && e.buttons) game.target = Math.max(0, Math.min(W - G, pointerX(e) - G / 2)); });
 addEventListener('keydown', e => {
   if (!game) return;
+  if (game.type === 'run') { if (e.key === ' ' || e.key === 'ArrowUp') { e.preventDefault(); jump(); } return; }
   if (e.key === 'ArrowLeft') game.target = Math.max(0, game.x - 50);
   if (e.key === 'ArrowRight') game.target = Math.min(W - G, game.x + 50);
 });
 
 // ---------- 씨앗 상점 ----------
 const SHOP = [
-  { id: 'nutri', name: '🧪 성장 영양제', price: 15, desc: '아기 구마 EXP +25',
-    ok: v => v.sp === 0 && v.exp < v.evo, why: '아기 구마만 먹을 수 있어요',
+  { id: 'nutri', name: '🧪 성장 영양제', price: 15, desc: '진화 EXP +25',
+    ok: v => v.evo > 0 && v.exp < v.evo, why: '더 진화할 수 없거나 이미 준비됐어요',
     use: () => { delta.exp += 25; act('eat', 1500); say('영양제를 먹고 쑥쑥 자라요! 🌱'); } },
   { id: 'snack', name: '🍠 군고구마', price: 5, desc: '배부름 +30',
     ok: v => v.food < 100, why: '배가 불러요',
@@ -473,6 +587,7 @@ $('btnConnect').onclick = connect;
 $('btnCall').onclick = () => { if (link) { link.send('CALL'); say('구마를 부르는 중...'); } };
 $('btnHome').onclick = sendHome;
 $('btnGame').onclick = startGame;
+$('btnRun').onclick = startRun;
 $('btnSnack').onclick = () => {
   if (snacks >= 3) { say('간식은 한 번 놀러 올 때 3개까지만 줄 수 있어요.'); return; }
   snacks++; delta.food += 10; delta.energy += 5; act('eat', 1800); say('냠냠! 맛있어요 🍠'); refresh();
