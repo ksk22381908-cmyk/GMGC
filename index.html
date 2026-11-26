@@ -409,10 +409,31 @@ function drawBg(t) {
   for (let x = 6; x < W; x += 22) { ctx.fillRect(x, GROUND - 20, 2, 4); ctx.fillRect(x + 4, GROUND - 22, 2, 6); }
 }
 
+// 그림 칸 아래쪽 빈 공간 비율 (동작 행마다, 4프레임 중 가장 아래 발 기준). 종마다 달라서 한 번 재서 기억해 둔다
+const footPad = {};
+function padOf(key, row) {
+  const id = key + ':' + row;
+  if (id in footPad) return footPad[id];
+  const s = img[key], cw = s.width / 4, ch = s.height / 6;
+  const c = document.createElement('canvas'); c.width = s.width; c.height = ch;
+  const cx = c.getContext('2d');
+  cx.drawImage(s, 0, row * ch, s.width, ch, 0, 0, s.width, ch);
+  const a = cx.getImageData(0, 0, s.width, ch).data;
+  let bottom = 0;
+  for (let y = ch - 1; y >= 0 && !bottom; y--)
+    for (let x = 0; x < s.width; x++) if (a[(y * s.width + x) * 4 + 3] > 0) { bottom = y + 1; break; }
+  return (footPad[id] = bottom ? (ch - bottom) / ch : 0);
+}
+
+// 발바닥 높이: 잔디 띠(GROUND-16 ~ GROUND+6)의 가운데쯤. 갈색 흙에 묻혀 보이지 않게
+const FEET = GROUND - 3;
+
 // 걷기 그림은 오른쪽을 보므로 왼쪽으로 갈 땐 좌우를 뒤집는다
+// y 는 "발바닥 높이 - size" 로 넘긴다. 칸 아래 빈 공간만큼 내려서 실제 발이 그 높이에 오게 한다
 function drawPet(sp, anim, frame, x, y, size = PET, flip = false) {
-  const s = img[SPECIES[sp].key]; if (!s) return;
+  const key = SPECIES[sp].key, s = img[key]; if (!s) return;
   const cw = s.width / 4, ch = s.height / 6;
+  y += padOf(key, ROW[anim]) * size;
   ctx.save();
   ctx.translate(Math.round(x) + (flip ? size : 0), Math.round(y));
   if (flip) ctx.scale(-1, 1);
@@ -444,7 +465,7 @@ function loop(t) {
     link && link.send(`BACK exp=${delta.exp} fun=${delta.fun} food=${delta.food} energy=${delta.energy} seeds=${delta.seeds} egg=${delta.egg} evo=${delta.evo}`);
     return;
   }
-  drawPet(pet.sp, anim === 'happy' ? 'idle' : anim, fr, actor.x, GROUND + 8 - PET - (actor.anim === 'happy' ? (fr % 2) * 5 : 0), PET, flip);
+  drawPet(pet.sp, anim === 'happy' ? 'idle' : anim, fr, actor.x, FEET - PET - (actor.anim === 'happy' ? (fr % 2) * 5 : 0), PET, flip);
 }
 
 // ---------- 미니게임: 벌레 피하기 ----------
@@ -496,10 +517,10 @@ function stepRun(t, fr) {
     }
     if (!b.counted && b.x + 26 < RUN_X) { b.counted = true; if (!b.hit) g.score++; }
     const bs = img.bug, f = Math.floor(t / 90) % 8;
-    if (bs && !b.hit) ctx.drawImage(bs, f * bs.width / 8, 0, bs.width / 8, bs.height, b.x, GROUND - 22, 30, 30);
+    if (bs && !b.hit) ctx.drawImage(bs, f * bs.width / 8, 0, bs.width / 8, bs.height, b.x, FEET - 27, 30, 30);
   }
   g.bugs = g.bugs.filter(b => b.x > -40 && !b.hit);
-  if (!(t < g.hurtUntil && Math.floor(t / 100) % 2)) drawPet(pet.sp, 'walk', fr, RUN_X, GROUND + 6 - G - g.h, G);
+  if (!(t < g.hurtUntil && Math.floor(t / 100) % 2)) drawPet(pet.sp, 'walk', fr, RUN_X, FEET - G - g.h, G);
   drawHud(g, t, dur, '벌레에 부딪혔어요');
 }
 
@@ -518,7 +539,7 @@ function stepGame(t, fr) {
   }
   for (const b of g.bugs) {
     if (!g.over) b.y += b.vy;
-    const bx = b.x + 14, by = b.y + 14, px = g.x + size / 2, py = GROUND - size / 2;
+    const bx = b.x + 14, by = b.y + 14, px = g.x + size / 2, py = FEET - size / 2;
     if (!b.hit && !g.over && Math.abs(bx - px) < 24 && Math.abs(by - py) < 24 && t > g.hurtUntil) {
       b.hit = true; g.lives--; g.hurtUntil = t + 900;
       if (navigator.vibrate) navigator.vibrate(80);
@@ -529,7 +550,7 @@ function stepGame(t, fr) {
   }
   g.bugs = g.bugs.filter(b => b.y < H + 10 && !b.hit);
   const moving = Math.abs(g.target - g.x) > 2;
-  if (!(t < g.hurtUntil && Math.floor(t / 100) % 2)) drawPet(pet.sp, moving ? 'walk' : 'idle', fr, g.x, GROUND + 6 - size, size, moving && g.target < g.x);
+  if (!(t < g.hurtUntil && Math.floor(t / 100) % 2)) drawPet(pet.sp, moving ? 'walk' : 'idle', fr, g.x, FEET - size, size, moving && g.target < g.x);
   drawHud(g, t, dur, '벌레에 잡혔어요');
 }
 
